@@ -1,0 +1,13 @@
+Cicada Uninstaller
+Copyright 2026 realLLUKS
+
+This product is the Electron desktop shell and the `cicada` command-line
+client for Cicada Uninstaller.
+
+The C# engine that this shell communicates with is a separate work, derived
+from Bulk Crap Uninstaller (https://www.bcuninstaller.com/), Copyright
+Klocman, licensed under the Apache License, Version 2.0. That engine is
+distributed from its own repository and is not included in this one.
+Recipients of the engine must retain the notices shipped alongside it.
+
+No Bulk Crap Uninstaller source code is contained in this repository.

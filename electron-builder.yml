@@ -1,0 +1,61 @@
+# electron-builder configuration for the Cicada Uninstaller shell.
+#
+# The engine is NOT part of this repository. If `engine/bin/cicada-engine.exe`
+# exists at build time it is bundled into the installer as an extra resource;
+# otherwise the packaged app expects the engine to be provided via
+# CICADA_ENGINE_PATH or an adjacent install (see src/engine/client.js).
+#
+# Build commands:
+#   npm run dist        NSIS installer + portable exe  -> dist/
+#   npm run dist:dir    unpacked win-unpacked/ app     -> dist/win-unpacked/
+
+appId: com.realLLUKS.cicada
+productName: Cicada Uninstaller
+copyright: Copyright © 2026 realLLUKS
+
+directories:
+  output: dist
+  buildResources: build
+
+# Zero runtime npm dependencies — only shell sources are packed.
+files:
+  - src/**/*
+  - assets/icon.ico
+  - assets/icon-light.ico
+  - package.json
+
+extraResources:
+  - from: engine/bin
+    to: engine
+    filter:
+      - cicada-engine.exe
+
+asar: true
+
+# pe-library's integrity embedding crashes with `Array buffer allocation failed`
+# on some hosts; the fuse only matters for signed hardened runtimes, and this
+# project ships unsigned, so ASAR integrity validation is disabled.
+disableAsarIntegrity: true
+
+win:
+  icon: assets/icon.ico
+  # code-signing: set CSC_LINK / CSC_KEY_PASSWORD env vars to sign,
+  # otherwise the artifact is left unsigned.
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Cicada Uninstaller
+  uninstallDisplayName: Cicada Uninstaller
+
+portable:
+  artifactName: CicadaUninstaller-Portable-${version}.exe

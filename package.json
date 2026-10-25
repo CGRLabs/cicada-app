@@ -1,0 +1,45 @@
+{
+  "name": "cicada-app",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cicada Uninstaller - Electron shell and CLI client",
+  "license": "Apache-2.0",
+  "author": "realLLUKS",
+  "homepage": "https://github.com/realLLUKS/cicada-app#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realLLUKS/cicada-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/realLLUKS/cicada-app/issues"
+  },
+  "keywords": [
+    "uninstaller",
+    "windows",
+    "electron",
+    "bulk-crap-uninstaller",
+    "software-removal",
+    "junk-cleaner"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/electron/main.js",
+  "bin": {
+    "cicada": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "electron .",
+    "cli": "node src/cli.js",
+    "doctor": "node src/cli.js doctor",
+    "create-shortcut": "node scripts/create-shortcut.js",
+    "lint": "node scripts/lint.js",
+    "test": "node --test test/**/*.test.js",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

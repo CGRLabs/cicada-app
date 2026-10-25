@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+*.log
+# Engine binaries are built from the separate engine repository; keep the
+# drop-in README but ignore any built artifacts.
+engine/bin/*
+!engine/bin/README.md

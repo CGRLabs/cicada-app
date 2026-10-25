@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    Content Security Policy: the shell is fully offline and loads no remote content.
+    - default-src 'none'   : deny everything by default
+    - script-src 'self'    : only the bundled renderer.js (no inline script, no eval)
+    - style-src 'self' 'unsafe-inline' : bundled stylesheet + the many inline style attributes
+    - img-src 'self' data: : bundled icons only
+    - connect-src 'none'   : the renderer can never open a network connection (zero telemetry)
+  -->
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Cicada Uninstaller</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- =========================================================
+       Inline SVG Icon Sprite
+       Stroke-based 24px glyphs that inherit `currentColor`.
+       Reference with: <svg class="icon"><use href="#i-search"></use></svg>
+
+       Dynamic references (resolved at runtime via svgIcon(name) in renderer.js,
+       so a static scan will flag them as unused): i-info, i-folder, i-server,
+       i-wifi, i-check-circle.
+       i-more is only visible on table-row hover (matches the original "..." affordance).
+       ========================================================= -->
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79Z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v5.5L5.2 18a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 8.5V3"/><path d="M6.5 15h11"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3.5 13.6 8.4 18.5 10 13.6 11.6 12 16.5 10.4 11.6 5.5 10 10.4 8.4 12 3.5Z"/><path d="M18.5 15.5 19.3 17.7 21.5 18.5 19.3 19.3 18.5 21.5 17.7 19.3 15.5 18.5 17.7 17.7 18.5 15.5Z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 3.5 9 14 14 0 0 1-3.5 9 14 14 0 0 1-3.5-9A14 14 0 0 1 12 3Z"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="16" r="4"/><path d="m11 13 9-9"/><path d="M17 4h3v3"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16.2a6 6 0 0 1 7 0"/><path d="M12 20h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><path d="M21.5 11.1V12a9.5 9.5 0 1 1-5.6-8.7"/><path d="m21.5 4.5-9.5 9.5-3-3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4.5M12 8h.01"/></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-hard-drive" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2.5"/><path d="M2 12h20"/><path d="M7 15h.01M11 15h.01"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8Z"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9.5 9-7 9 7V20a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22v-8h6v8"/></symbol>
+  </svg>
+
+  <!-- Header Strip -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-badge">
+        <img src="assets/icon.png" alt="Cicada" class="brand-logo-img" />
+      </div>
+      <div class="brand-info">
+        <span class="brand-title">Cicada</span>
+        <span class="brand-subtitle">Uninstaller Platform</span>
+      </div>
+    </div>
+
+    <!-- Global Header Search -->
+    <div class="header-search">
+      <span class="search-icon"><svg class="icon"><use href="#i-search"></use></svg></span>
+      <input id="searchInput" type="text" placeholder="Search applications, services, traces... (Ctrl+F)" autocomplete="off" spellcheck="false" />
+      <span class="search-kbd">Ctrl+F</span>
+    </div>
+
+    <!-- Actions & Indicators -->
+    <div class="header-actions">
+      <button id="paletteBtn" class="palette-btn" type="button" title="Command palette (Ctrl+K)" aria-label="Open command palette">
+        <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+        <span class="palette-btn-kbd">Ctrl+K</span>
+      </button>
+
+      <button id="refreshScanBtn" class="rescan-btn" type="button" title="Rescan system applications">
+        <span id="scanBtnIcon" class="rescan-icon"><svg class="icon"><use href="#i-refresh"></use></svg></span>
+        <span>Rescan</span>
+      </button>
+
+      <button id="themeToggle" class="icon-btn" type="button" title="Toggle theme (System / Light / Dark)">
+        <span id="themeToggleIcon"><svg class="icon"><use href="#i-moon"></use></svg></span>
+      </button>
+
+      <div id="headerElevationBadge" class="elevation-badge unelevated" title="Operating elevation state">
+        <span class="dot"></span>
+        <span id="headerElevationText">Unelevated</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Body: Sidebar + Views -->
+  <div class="app-body">
+    <!-- Sidebar Navigation -->
+    <aside id="appSidebar" class="app-sidebar">
+      <nav class="sidebar-nav">
+        <button id="tabDashboard" class="nav-item active" type="button" data-tab="dashboard" title="Mission Control (Ctrl+1)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-home"></use></svg></span>
+          <span class="nav-label">Mission Control</span>
+          <span class="nav-shortcut">Ctrl+1</span>
+        </button>
+
+        <button id="tabApps" class="nav-item" type="button" data-tab="apps" title="Applications (Ctrl+2)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-layers"></use></svg></span>
+          <span class="nav-label">Applications</span>
+          <span class="nav-shortcut">Ctrl+1</span>
+        </button>
+
+        <button id="tabJunk" class="nav-item" type="button" data-tab="junk" title="Junk Cleaner (Ctrl+3)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-trash"></use></svg></span>
+          <span class="nav-label">Junk Cleaner</span>
+          <span class="nav-shortcut">Ctrl+2</span>
+        </button>
+
+        <button id="tabStartup" class="nav-item" type="button" data-tab="startup" title="Startup & Services (Ctrl+4)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-settings"></use></svg></span>
+          <span class="nav-label">Startup & Services</span>
+          <span class="nav-shortcut">Ctrl+3</span>
+        </button>
+
+        <button id="tabDrivers" class="nav-item" type="button" data-tab="drivers" title="Drivers & Network (Ctrl+5)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-plug"></use></svg></span>
+          <span class="nav-label">Drivers & Network</span>
+          <span class="nav-shortcut">Ctrl+4</span>
+        </button>
+
+        <button id="tabSettings" class="nav-item" type="button" data-tab="settings" title="Settings & Background Shield (Ctrl+6)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-shield"></use></svg></span>
+          <span class="nav-label">Settings & Shield</span>
+          <span class="nav-shortcut">Ctrl+5</span>
+        </button>
+
+        <button id="tabDiagnostics" class="nav-item" type="button" data-tab="diagnostics" title="Technical Diagnostics (Ctrl+7)">
+          <span class="nav-icon"><svg class="icon"><use href="#i-flask"></use></svg></span>
+          <span class="nav-label">Diagnostics</span>
+          <span class="nav-shortcut">Ctrl+6</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="sidebarToggle" class="collapse-toggle" type="button" title="Expand or collapse sidebar">
+          <span class="toggle-icon"><svg class="icon"><use href="#i-chevron-right"></use></svg></span>
+          <span class="toggle-label">Collapse Sidebar</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Content Viewport -->
+    <main class="content-viewport">
+      <!-- =========================================================
+           View 0: Mission Control Dashboard
+           ========================================================= -->
+      <section id="viewDashboard" class="view-pane active">
+        <div class="dash-scroll-area">
+          <div class="dash-container">
+            <!-- Hero strip -->
+            <div class="dash-hero">
+              <div class="dash-hero-text">
+                <h1 class="view-title">Mission Control</h1>
+                <p class="view-subtitle">Live system overview at a glance — every card deep-links into its workspace. Press <kbd class="pal-kbd">Ctrl+K</kbd> to jump anywhere.</p>
+              </div>
+              <div class="dash-hero-meta">
+                <span id="dashEngineChip" class="badge"><span id="dashEngineChipText">Connecting...</span></span>
+                <span id="dashScanChip" class="badge">Last scan: never</span>
+              </div>
+            </div>
+
+            <!-- Engine onboarding (missing engine binary) -->
+            <div id="dashOnboarding" class="dash-onboarding" style="display: none;">
+              <span class="dash-onboard-icon"><svg class="icon" aria-hidden="true"><use href="#i-warning"></use></svg></span>
+              <div class="dash-onboard-body">
+                <h3>Engine binary not detected</h3>
+                <p>The shell is a dumb client — all system inspection and removal runs in the local C# engine over stdio, fully offline. Build the engine and drop <code>cicada-engine.exe</code> into <code>engine/bin/</code>, or point <code>CICADA_ENGINE_PATH</code> at it, then retry detection.</p>
+              </div>
+              <div class="dash-onboard-actions">
+                <button id="dashRetryEngineBtn" class="btn btn-secondary" type="button">Retry detection</button>
+                <button id="dashDiagBtn" class="btn btn-primary" type="button">Open Diagnostics</button>
+              </div>
+            </div>
+
+            <!-- Summary cards -->
+            <div class="dash-grid">
+              <button id="dashCardApps" class="dash-card" type="button" aria-label="Applications: open the Applications view">
+                <span class="dash-card-icon tone-accent"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg></span>
+                <span class="dash-card-value" id="dashAppsValue">—</span>
+                <span class="dash-card-label">Applications</span>
+                <span class="dash-card-hint" id="dashAppsHint">Loading inventory...</span>
+                <span class="dash-card-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></span>
+              </button>
+
+              <button id="dashCardJunk" class="dash-card" type="button" aria-label="Reclaimable: open the Junk Cleaner view">
+                <span class="dash-card-icon tone-info"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></span>
+                <span class="dash-card-value" id="dashJunkValue">—</span>
+                <span class="dash-card-label">Reclaimable</span>
+                <span class="dash-card-hint" id="dashJunkHint">Run a junk scan for live numbers</span>
+                <span class="dash-card-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></span>
+              </button>
+
+              <button id="dashCardStartup" class="dash-card" type="button" aria-label="Startup impact: open the Startup & Services view">
+                <span class="dash-card-icon tone-warning"><svg class="icon" aria-hidden="true"><use href="#i-zap"></use></svg></span>
+                <span class="dash-card-value" id="dashStartupValue">—</span>
+                <span class="dash-card-label">Startup Impact</span>
+                <span class="dash-card-hint" id="dashStartupHint">Not scanned yet</span>
+                <span class="dash-card-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></span>
+              </button>
+
+              <button id="dashCardDrivers" class="dash-card" type="button" aria-label="Duplicate drivers: open the Drivers & Network view">
+                <span class="dash-card-icon tone-info"><svg class="icon" aria-hidden="true"><use href="#i-plug"></use></svg></span>
+                <span class="dash-card-value" id="dashDriversValue">—</span>
+                <span class="dash-card-label">Duplicate Drivers</span>
+                <span class="dash-card-hint" id="dashDriversHint">Not scanned yet</span>
+                <span class="dash-card-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></span>
+              </button>
+
+              <button id="dashCardShield" class="dash-card" type="button" aria-label="Shield: open the Settings & Shield view">
+                <span class="dash-card-icon tone-danger"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg></span>
+                <span class="dash-card-value" id="dashShieldValue">—</span>
+                <span class="dash-card-label">Deny-List Shield</span>
+                <span class="dash-card-hint" id="dashShieldHint">Protected components on this system</span>
+                <span class="dash-card-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></span>
+              </button>
+
+              <button id="dashCardCache" class="dash-card" type="button" aria-label="Snapshot cache: open the Settings & Shield view">
+                <span class="dash-card-icon tone-success"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg></span>
+                <span class="dash-card-value" id="dashCacheValue">—</span>
+                <span class="dash-card-label">Snapshot Cache</span>
+                <span class="dash-card-hint" id="dashCacheHint">Instant startup snapshot status</span>
+                <span class="dash-card-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           View 1: Applications Explorer
+           ========================================================= -->
+      <section id="viewApplications" class="view-pane">
+        <!-- Filter Toolbar -->
+        <div class="sub-toolbar">
+          <div class="filter-cluster">
+            <button id="appsFilterTrigger" class="filter-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" title="Filter the application list">
+              <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+              <span>Filters</span>
+              <span id="appsFilterBadge" class="filter-badge" hidden>0</span>
+              <svg class="icon filter-caret" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+            </button>
+
+            <div id="appsFilterPopover" class="filter-popover" role="dialog" aria-label="Filter applications" hidden>
+              <div class="filter-popover-head">
+                <span class="filter-popover-title">Filter applications</span>
+                <button id="appsFilterReset" class="filter-reset" type="button">Reset</button>
+              </div>
+              <div id="appsFilterOptions" class="filter-options"></div>
+            </div>
+
+            <div id="appsActiveFilters" class="active-filters"></div>
+          </div>
+
+          <div class="toolbar-meta">
+            <span id="appsResultCount" class="toolbar-meta-text">No inventory loaded</span>
+          </div>
+        </div>
+
+        <!-- Stats Bar -->
+        <div class="stats-strip">
+          <div class="stats-pills">
+            <span class="stat-pill"><span id="appsSummary">0 apps</span></span>
+            <span class="stat-pill"><span id="totalSizeSummary">0 MB</span></span>
+            <span class="stat-pill"><span id="appsLargeSummary">0 large</span></span>
+          </div>
+          <span id="scanElapsedInfo" class="stats-note">Ready</span>
+        </div>
+
+        <!-- Table & Detail Drawer Workspace -->
+        <div class="table-workspace">
+          <div id="tableScrollContainer" class="table-scroll-container">
+            <table class="apps-table" id="appsTable">
+              <thead>
+                <tr>
+                  <th class="col-check">
+                    <input type="checkbox" id="selectAllAppsCheck" title="Select all applications" />
+                  </th>
+                  <th class="col-app sortable sorted-asc" data-sort="name">
+                    Application Name <span class="sort-icon"><svg class="icon"><use href="#i-chevron-up"></use></svg></span>
+                  </th>
+                  <th class="col-publisher sortable" data-sort="publisher">
+                    Publisher <span class="sort-icon"><svg class="icon"><use href="#i-chevron-up"></use></svg></span>
+                  </th>
+                  <th class="col-version sortable" data-sort="version">
+                    Version <span class="sort-icon"><svg class="icon"><use href="#i-chevron-up"></use></svg></span>
+                  </th>
+                  <th class="col-size sortable" data-sort="size">
+                    Size <span class="sort-icon"><svg class="icon"><use href="#i-chevron-up"></use></svg></span>
+                  </th>
+                  <th class="col-type sortable" data-sort="type">
+                    Type <span class="sort-icon"><svg class="icon"><use href="#i-chevron-up"></use></svg></span>
+                  </th>
+                  <th class="col-silent">
+                    Silent
+                  </th>
+                </tr>
+              </thead>
+              <tbody id="appsTableBody">
+                <!-- Dynamically populated or virtual scrolled rows -->
+              </tbody>
+            </table>
+
+            <!-- Skeleton Loading State (Shown during scan) -->
+            <div id="loadingState" style="display: none; padding: 0;">
+              <table class="apps-table" style="pointer-events: none;">
+                <tbody>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 60%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 40%;"></div></td><td><div class="skeleton-cell" style="width: 70%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 75%;"></div></td><td><div class="skeleton-cell" style="width: 60%;"></div></td><td><div class="skeleton-cell" style="width: 35%;"></div></td><td><div class="skeleton-cell" style="width: 65%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 45%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 80%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 65%;"></div></td><td><div class="skeleton-cell" style="width: 55%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td><td><div class="skeleton-cell" style="width: 55%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 80%;"></div></td><td><div class="skeleton-cell" style="width: 40%;"></div></td><td><div class="skeleton-cell" style="width: 45%;"></div></td><td><div class="skeleton-cell" style="width: 70%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 55%;"></div></td><td><div class="skeleton-cell" style="width: 65%;"></div></td><td><div class="skeleton-cell" style="width: 40%;"></div></td><td><div class="skeleton-cell" style="width: 60%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 70%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 35%;"></div></td><td><div class="skeleton-cell" style="width: 75%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                  <tr class="skeleton-row"><td class="col-check"></td><td><div class="skeleton-cell" style="width: 60%;"></div></td><td><div class="skeleton-cell" style="width: 45%;"></div></td><td><div class="skeleton-cell" style="width: 40%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 50%;"></div></td><td><div class="skeleton-cell" style="width: 30%;"></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Empty / No Results -->
+            <div id="noResultsState" class="empty-state" style="display: none;">
+              <div class="empty-state-icon"><svg class="icon"><use href="#i-search"></use></svg></div>
+              <h3>No Matching Applications</h3>
+              <p>Try adjusting your search query or switching active filter chips.</p>
+            </div>
+          </div>
+
+          <!-- Slide-in Right Detail Drawer -->
+          <aside id="detailDrawer" class="detail-drawer">
+            <div class="drawer-header">
+              <div id="drawerAvatar" class="drawer-avatar-lg">A</div>
+              <div class="drawer-header-text">
+                <div id="drawerTitle" class="drawer-title">Application Name</div>
+                <div id="drawerSubtitle" class="drawer-subtitle">Publisher</div>
+              </div>
+              <button id="closeDrawerBtn" class="close-btn" type="button" title="Close drawer (Esc)"><svg class="icon"><use href="#i-close"></use></svg></button>
+            </div>
+
+            <div class="drawer-body">
+              <div class="drawer-section-title">Application Metadata</div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Publisher</span>
+                <span id="drawerPublisher" class="drawer-value">—</span>
+              </div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Version</span>
+                <span id="drawerVersion" class="drawer-value">—</span>
+              </div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Install Date</span>
+                <span id="drawerInstallDate" class="drawer-value">—</span>
+              </div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Estimated Size</span>
+                <span id="drawerSize" class="drawer-value">—</span>
+              </div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Uninstaller Type</span>
+                <span id="drawerType" class="drawer-value">—</span>
+              </div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Quiet (Silent) Uninstall</span>
+                <span id="drawerSilent" class="drawer-value">—</span>
+              </div>
+
+              <div class="drawer-section-title">System Paths & Identifiers</div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Install Location</span>
+                <div id="drawerLocation" class="drawer-value mono">—</div>
+              </div>
+
+              <div class="drawer-field">
+                <span class="drawer-label">Registry / Product ID</span>
+                <div id="drawerId" class="drawer-value mono">—</div>
+              </div>
+
+              <div id="drawerUrlField" class="drawer-field" style="display: none;">
+                <span class="drawer-label">Website / Homepage</span>
+                <div id="drawerUrl" class="drawer-value">—</div>
+              </div>
+            </div>
+
+            <div class="drawer-actions">
+              <div id="protectedNotice" class="protected-badge" style="display: none;">
+                <svg class="icon"><use href="#i-shield"></use></svg> Protected System Component
+              </div>
+              <button id="uninstallBtn" class="btn btn-danger" type="button">Uninstall Application</button>
+              <button id="scanAppJunkBtn" class="btn btn-secondary" type="button"><svg class="icon"><use href="#i-search"></use></svg> Scan for Leftovers</button>
+              <button id="copyPathBtn" class="btn btn-secondary" type="button"><svg class="icon"><use href="#i-copy"></use></svg> Copy Install Path</button>
+            </div>
+          </aside>
+
+          <!-- Floating Batch Action Bar -->
+          <div id="batchBar" class="batch-bar" style="display: none;">
+            <span id="batchCountText">0 selected</span>
+            <div style="display: flex; gap: 8px;">
+              <button id="batchUninstallBtn" class="btn btn-danger" type="button">Uninstall Selected</button>
+              <button id="batchClearBtn" class="btn btn-secondary" type="button">Clear Selection</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           View 2: Junk Cleaner (2-Column Layout)
+           ========================================================= -->
+      <section id="viewJunk" class="view-pane">
+        <div class="sub-toolbar">
+          <div class="toolbar-search">
+            <span class="search-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
+            <input id="junkSearchInput" type="text" class="search-input" placeholder="Filter residuals by path or app..." autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div class="toolbar-meta">
+            <div class="switch-control">
+              <label class="switch" title="Preview results without deleting anything">
+                <input type="checkbox" id="junkSimulateToggle" checked />
+                <span class="slider"></span>
+              </label>
+              <span class="switch-label" id="junkSimulateLabel">Dry Run (Simulate)</span>
+            </div>
+
+            <button id="cleanJunkBtn" class="btn btn-danger" type="button" disabled>Clean Selected</button>
+          </div>
+        </div>
+
+        <div class="stats-strip">
+          <span id="junkSummary">Select an application or click 'Scan Orphaned Leftovers'</span>
+          <span id="junkSelectionSummary">0 selected</span>
+        </div>
+
+        <div class="junk-split-view">
+          <!-- Column 1: Target App Picker -->
+          <div class="junk-picker-col">
+            <div class="picker-header">Target Applications</div>
+            <div class="picker-search">
+              <input id="junkAppSearch" type="text" placeholder="Search target apps..." />
+            </div>
+            <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-color);">
+              <button id="scanOrphanedJunkBtn" class="btn btn-secondary" style="width: 100%; font-size: 11.5px;" type="button">
+                <span id="junkScanIcon"><svg class="icon"><use href="#i-refresh"></use></svg></span> Scan Orphaned Leftovers
+              </button>
+            </div>
+            <div id="junkAppPickerList" class="picker-list">
+              <!-- Dynamically populated target apps -->
+            </div>
+          </div>
+
+          <!-- Column 2: Scan Results -->
+          <div class="junk-results-col">
+            <div class="table-scroll-container">
+              <table class="apps-table" id="junkTable">
+                <thead>
+                  <tr>
+                    <th style="width: 40px; text-align: center;"><input type="checkbox" id="selectAllJunkCheck" /></th>
+                    <th style="width: 80px;">Type</th>
+                    <th style="width: 110px;">Confidence</th>
+                    <th style="width: 180px;">Target App</th>
+                    <th>Residual Path / Registry Key</th>
+                  </tr>
+                </thead>
+                <tbody id="junkTableBody">
+                  <!-- Dynamically rendered junk rows -->
+                </tbody>
+              </table>
+
+              <div id="junkLoadingState" class="empty-state" style="display: none;">
+                <div class="spinner"></div>
+                <h3>Analyzing System Residues</h3>
+                <p>Inspecting filesystem paths, registry hives, and orphaned shortcuts...</p>
+              </div>
+
+              <div id="junkNoResultsState" class="empty-state">
+                <div class="empty-state-icon"><svg class="icon"><use href="#i-sparkles"></use></svg></div>
+                <h3>No Leftover Residuals Found</h3>
+                <p>Select an application on the left or scan for orphaned traces.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           View 3: Startup & Services Manager
+           ========================================================= -->
+      <section id="viewStartup" class="view-pane">
+        <div class="sub-toolbar">
+          <div class="filter-cluster">
+            <button id="startupFilterTrigger" class="filter-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" title="Filter startup entries">
+              <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+              <span>Filters</span>
+              <span id="startupFilterBadge" class="filter-badge" hidden>0</span>
+              <svg class="icon filter-caret" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+            </button>
+
+            <div id="startupFilterPopover" class="filter-popover" role="dialog" aria-label="Filter startup entries" hidden>
+              <div class="filter-popover-head">
+                <span class="filter-popover-title">Filter startup entries</span>
+                <button id="startupFilterReset" class="filter-reset" type="button">Reset</button>
+              </div>
+              <div id="startupFilterOptions" class="filter-options"></div>
+            </div>
+
+            <div id="startupActiveFilters" class="active-filters"></div>
+          </div>
+
+          <div class="toolbar-meta toolbar-meta-split">
+            <div class="toolbar-search toolbar-search-compact">
+              <span class="search-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
+              <input id="startupSearchInput" type="text" class="search-input" placeholder="Search startup items..." autocomplete="off" spellcheck="false" />
+            </div>
+            <button id="refreshStartupBtn" class="btn btn-secondary" type="button" title="Refresh startup entries">
+              <span id="startupRefreshIcon"><svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg></span> Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="stats-strip">
+          <span id="startupSummary">0 startup items discovered</span>
+          <span id="startupActiveSummary">0 enabled, 0 disabled</span>
+        </div>
+
+        <div class="startup-scroll-area">
+          <div id="startupLoadingState" class="empty-state" style="display: none;">
+            <div class="spinner"></div>
+            <h3>Discovering Startup & Services</h3>
+            <p>Scanning Run keys, Task Scheduler directories, and Windows Service Control Manager...</p>
+          </div>
+
+          <div id="startupNoResultsState" class="empty-state" style="display: none;">
+            <div class="empty-state-icon"><svg class="icon"><use href="#i-settings"></use></svg></div>
+            <h3>No Matching Startup Entries</h3>
+            <p>Try modifying your search filter or reload the entries.</p>
+          </div>
+
+          <!-- Card-Based Kind Groups -->
+          <div id="startupContainer" style="display: flex; flex-direction: column; gap: 16px;">
+            <!-- Group: Registry Startup -->
+            <div id="groupRegistry" class="startup-group-card">
+              <div class="group-header" data-group="registry">
+                <div class="group-title">
+                  <span class="group-icon"><svg class="icon"><use href="#i-key"></use></svg></span>
+                  <span>Registry Startup</span>
+                  <span class="group-count" id="countRegistry">0</span>
+                </div>
+                <span class="group-chevron"><svg class="icon"><use href="#i-chevron-down"></use></svg></span>
+              </div>
+              <div class="group-items" id="itemsRegistry"></div>
+            </div>
+
+            <!-- Group: Scheduled Tasks -->
+            <div id="groupTasks" class="startup-group-card">
+              <div class="group-header" data-group="tasks">
+                <div class="group-title">
+                  <span class="group-icon"><svg class="icon"><use href="#i-clock"></use></svg></span>
+                  <span>Scheduled Tasks</span>
+                  <span class="group-count" id="countTasks">0</span>
+                </div>
+                <span class="group-chevron"><svg class="icon"><use href="#i-chevron-down"></use></svg></span>
+              </div>
+              <div class="group-items" id="itemsTasks"></div>
+            </div>
+
+            <!-- Group: Windows Services -->
+            <div id="groupServices" class="startup-group-card">
+              <div class="group-header" data-group="services">
+                <div class="group-title">
+                  <span class="group-icon"><svg class="icon"><use href="#i-zap"></use></svg></span>
+                  <span>Windows Services</span>
+                  <span class="group-count" id="countServices">0</span>
+                </div>
+                <span class="group-chevron"><svg class="icon"><use href="#i-chevron-down"></use></svg></span>
+              </div>
+              <div class="group-items" id="itemsServices"></div>
+            </div>
+
+            <!-- Group: Browser Helpers & Others -->
+            <div id="groupHelpers" class="startup-group-card">
+              <div class="group-header" data-group="helpers">
+                <div class="group-title">
+                  <span class="group-icon"><svg class="icon"><use href="#i-puzzle"></use></svg></span>
+                  <span>Browser Helpers & Other</span>
+                  <span class="group-count" id="countHelpers">0</span>
+                </div>
+                <span class="group-chevron"><svg class="icon"><use href="#i-chevron-down"></use></svg></span>
+              </div>
+              <div class="group-items" id="itemsHelpers"></div>
+            </div>
+          </div>
+
+          <!-- Compatibility Hidden Table Body -->
+          <tbody id="startupTableBody" style="display: none;"></tbody>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           View 4: Drivers & Network Manager
+           ========================================================= -->
+      <section id="viewDrivers" class="view-pane">
+        <div class="view-header-strip">
+          <div class="view-title-group">
+            <h1 class="view-title">Drivers & Network Manager</h1>
+            <p class="view-subtitle">Inspect OEM device drivers, safely purge obsolete/duplicate drivers, and manage network interfaces & routing caches.</p>
+          </div>
+          <div class="subtab-group">
+            <button id="subTabDrivers" class="subtab-btn active" type="button"><svg class="icon"><use href="#i-sliders"></use></svg> OEM Drivers</button>
+            <button id="subTabNetwork" class="subtab-btn" type="button"><svg class="icon"><use href="#i-globe"></use></svg> Network & Janitor</button>
+          </div>
+        </div>
+
+        <!-- Sub-view 1: Driver Packages -->
+        <div id="paneDrivers" class="subview-pane active">
+          <!-- Toolbar -->
+          <div class="view-toolbar">
+            <div class="toolbar-search">
+              <span class="search-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
+              <input type="text" id="driverSearchInput" class="search-input" placeholder="Search drivers by name, provider, inf..." autocomplete="off" spellcheck="false" />
+            </div>
+
+            <div class="filter-cluster">
+              <button id="driverFilterTrigger" class="filter-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" title="Filter driver packages">
+                <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+                <span>Filters</span>
+                <span id="driverFilterBadge" class="filter-badge" hidden>0</span>
+                <svg class="icon filter-caret" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+              </button>
+
+              <div id="driverFilterPopover" class="filter-popover" role="dialog" aria-label="Filter driver packages" hidden>
+                <div class="filter-popover-head">
+                  <span class="filter-popover-title">Filter driver packages</span>
+                  <button id="driverFilterReset" class="filter-reset" type="button">Reset</button>
+                </div>
+                <div id="driverFilterOptions" class="filter-options"></div>
+              </div>
+
+              <div id="driverActiveFilters" class="active-filters"></div>
+            </div>
+
+            <div class="toolbar-actions">
+              <div class="switch-control">
+                <label class="switch" title="Simulate removal without altering the system driver store">
+                  <input type="checkbox" id="driverDryRunCheckbox" checked />
+                  <span class="slider"></span>
+                </label>
+                <span class="switch-label">Dry Run</span>
+              </div>
+              <button id="btnRefreshDrivers" class="btn btn-secondary" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Stats Pill Bar -->
+          <div class="stats-row">
+            <span id="pillTotalDrivers" class="stat-pill">0 drivers found</span>
+            <span id="pillProtectedDrivers" class="stat-pill protected">0 system protected</span>
+            <span id="pillDuplicateDrivers" class="stat-pill warning">0 duplicates detected</span>
+          </div>
+
+          <!-- Table Container -->
+          <div class="table-container" style="flex: 1; overflow-y: auto;">
+            <table class="data-table" id="driversTable">
+              <thead>
+                <tr>
+                  <th style="width: 11%;">INF Name</th>
+                  <th style="width: 14%;">Original File</th>
+                  <th>Provider / Vendor</th>
+                  <th style="width: 13%;">Class</th>
+                  <th style="width: 14%;">Version & Date</th>
+                  <th style="width: 12%;">Status</th>
+                  <th style="width: 11%; text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="driversTableBody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+
+            <div id="driversLoadingState" class="empty-state" style="display: none;">
+              <div class="spinner"></div>
+              <h3>Enumerating Driver Packages...</h3>
+              <p>Querying Windows Driver Store via authoritative offline inspection.</p>
+            </div>
+
+            <div id="driversNoResultsState" class="empty-state" style="display: none;">
+              <div class="empty-state-icon"><svg class="icon"><use href="#i-search"></use></svg></div>
+              <h3>No Drivers Found</h3>
+              <p>No driver packages matched your search criteria or filter.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-view 2: Network Adapters & Janitor -->
+        <div id="paneNetwork" class="subview-pane" style="display: none;">
+          <div class="diagnostics-scroll-area">
+            <div class="diagnostics-container">
+              <!-- Network Janitor Action Box -->
+              <div class="card network-janitor-card">
+                <div class="card-header">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="card-icon"><svg class="icon"><use href="#i-zap"></use></svg></span>
+                    <h2 class="card-title">Network Stack Janitor (Local & Offline)</h2>
+                  </div>
+                  <div class="badge badge-success">
+                    <span>100% Offline</span>
+                  </div>
+                </div>
+
+                <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px;">
+                  Quickly clear cached domain resolutions and reset local IP-to-MAC routing tables to resolve stuck connections, ghost routes, or stale DNS records without modifying adapter configurations.
+                </p>
+
+                <div class="modal-options-group" style="margin-bottom: 16px;">
+                  <div class="modal-toggle-row">
+                    <div>
+                      <div style="font-weight: 500;">Flush DNS Resolver Cache</div>
+                      <div style="font-size: 11px; color: var(--text-muted);">Calls Windows dnsapi.dll DnsFlushResolverCache to clear stale hostname resolutions</div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" id="netOptDns" checked />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="modal-toggle-row">
+                    <div>
+                      <div style="font-weight: 500;">Flush ARP Routing Cache</div>
+                      <div style="font-size: 11px; color: var(--text-muted);">Flushes address resolution protocol table to clear ghost gateway mappings</div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" id="netOptArp" checked />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="modal-toggle-row">
+                    <div>
+                      <div style="font-weight: 500;">Dry-Run Simulation</div>
+                      <div style="font-size: 11px; color: var(--text-muted);">Simulate cleanup routines safely without system mutation</div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" id="netDryRunToggle" checked />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between;">
+                  <button id="btnCleanNetwork" class="btn btn-primary" type="button">
+                    <svg class="icon"><use href="#i-zap"></use></svg>
+                    <span>Flush & Clean Network Cache</span>
+                  </button>
+                  <span id="netCleanStatusText" style="font-size: 11.5px; color: var(--text-muted);">Ready to flush</span>
+                </div>
+
+                <div id="netCleanResultBox" class="clean-result-box" style="display: none; margin-top: 14px;"></div>
+              </div>
+
+              <!-- Network Adapters Overview Card -->
+              <div class="card">
+                <div class="card-header">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="card-icon"><svg class="icon"><use href="#i-globe"></use></svg></span>
+                    <h2 class="card-title">Network Adapters & Virtual Interfaces</h2>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <button id="btnRefreshNetwork" class="btn btn-secondary btn-sm" type="button">Refresh Adapters</button>
+                  </div>
+                </div>
+
+                <!-- Adapters stats row -->
+                <div class="stats-row" style="margin-bottom: 14px;">
+                  <span id="pillTotalAdapters" class="stat-pill">0 adapters</span>
+                  <span id="pillPhysicalAdapters" class="stat-pill success">0 physical</span>
+                  <span id="pillVirtualAdapters" class="stat-pill">0 virtual / VPN</span>
+                </div>
+
+                <div id="networkAdaptersGrid" class="network-grid">
+                  <!-- Dynamically populated adapter cards -->
+                </div>
+
+                <div id="networkLoadingState" class="empty-state" style="display: none;">
+                  <div class="spinner"></div>
+                  <h3>Scanning Network Interfaces...</h3>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           View 5: Settings & Background Shield
+           ========================================================= -->
+      <section id="viewSettings" class="view-pane">
+        <div class="diagnostics-scroll-area">
+          <div class="diagnostics-container">
+            <!-- Smart Offline Cache & Background Control Card -->
+            <div class="card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="card-icon"><svg class="icon"><use href="#i-zap"></use></svg></span>
+                  <h2 class="card-title">Instant Startup & Background Fast-Start</h2>
+                </div>
+                <div id="cacheStatusBadge" class="badge">
+                  <span id="cacheStatusBadgeText">Checking cache...</span>
+                </div>
+              </div>
+
+              <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px;">
+                Cicada maintains a safe, local offline snapshot of your software inventory so the app opens instantaneously without waiting for a fresh registry scan.
+              </p>
+
+              <div class="path-box" style="margin-bottom: 14px;">
+                <div class="path-box-label">Local Snapshot Status</div>
+                <div id="cacheDetailText" class="path-box-value">Loading cache statistics...</div>
+              </div>
+
+              <div class="modal-options-group" style="margin-bottom: 16px;">
+                <div class="modal-toggle-row">
+                  <div>
+                    <div style="font-weight: 500;">Instant Startup Cache</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">Render inventory immediately on open from local snapshot</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingInstantCache" checked />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="modal-toggle-row">
+                  <div>
+                    <div style="font-weight: 500;">Keep Cache Warm in Background (System Tray)</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">Periodically updates snapshot in background with a visible tray icon</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingBackgroundRefresh" checked />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="modal-toggle-row">
+                  <div>
+                    <div style="font-weight: 500;">Minimize to Tray on Window Close</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">Hide window to system tray instead of exiting immediately</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingMinimizeToTray" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="modal-toggle-row">
+                  <div>
+                    <div style="font-weight: 500;">Background Refresh Frequency</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">How often the background worker updates the offline inventory</div>
+                  </div>
+                  <select id="settingRefreshInterval" style="height: 28px; padding: 0 8px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 12px;">
+                    <option value="15">Every 15 minutes</option>
+                    <option value="30" selected>Every 30 minutes</option>
+                    <option value="60">Every 1 hour</option>
+                    <option value="0">Manual only (Disabled)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                <div style="display: flex; gap: 8px;">
+                  <button id="refreshCacheBtn" class="btn btn-secondary" type="button">Update Cache Now</button>
+                  <button id="clearCacheBtn" class="btn btn-secondary" type="button">Purge Local Cache</button>
+                </div>
+                <button id="quitAppBtn" class="btn btn-danger" type="button" title="Close all processes and exit immediately"><svg class="icon"><use href="#i-power"></use></svg> Quit Cicada Completely</button>
+              </div>
+
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 12px; display: flex; align-items: center; gap: 6px;">
+                <svg class="icon"><use href="#i-lock"></use></svg>
+                <span><b>100% Local & Transparent:</b> No telemetry, no background network calls. Exiting immediately terminates all background processes.</span>
+              </div>
+            </div>
+
+            <!-- System Restore Protection Card -->
+            <div class="card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="card-icon"><svg class="icon"><use href="#i-shield"></use></svg></span>
+                  <h2 class="card-title">Windows System Restore Protection</h2>
+                </div>
+                <div id="restoreStatusBadge" class="badge">
+                  <span id="restoreStatusBadgeText">Checking...</span>
+                </div>
+              </div>
+
+              <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px;">
+                System Restore creates snapshots of Windows system files, registry hives, and installed programs, allowing quick rollback prior to uninstallation.
+              </p>
+
+              <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px;">
+                <input id="restoreDescInput" type="text" placeholder="Restore point description (e.g. Before Batch Removal)" style="flex: 1; height: 32px; padding: 0 12px; background: var(--bg-card-subtle); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 12.5px;" />
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer;">
+                  <input type="checkbox" id="restoreSimulateCheck" />
+                  <span>Simulate only</span>
+                </label>
+                <button id="createRestoreBtn" class="btn btn-primary" type="button">Create Checkpoint</button>
+              </div>
+
+              <div id="restoreFeedbackBanner" class="warning-callout" style="display: none;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           View 5: Technical Diagnostics
+           ========================================================= -->
+      <section id="viewDiagnostics" class="view-pane">
+        <div class="diagnostics-scroll-area">
+          <div class="diagnostics-container">
+            <!-- Connection & Health Card -->
+            <div class="card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span id="diagStatusPulse" class="pulsing-dot"></span>
+                  <h2 class="card-title">C# Engine Health & Status</h2>
+                </div>
+                <div id="diagStatusBadge" class="badge">
+                  <span id="diagStatusBadgeText">Connecting...</span>
+                </div>
+              </div>
+
+              <div id="diagErrorBanner" class="warning-callout" style="display: none; margin-bottom: 16px;"></div>
+
+              <div class="grid-metrics">
+                <div class="metric-item">
+                  <div class="metric-label">Engine Name</div>
+                  <div id="diagMetricEngine" class="metric-value">cicada-engine</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-label">Engine Version</div>
+                  <div id="diagMetricVersion" class="metric-value">—</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-label">Platform Architecture</div>
+                  <div id="diagMetricPlatform" class="metric-value">—</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-label">Elevation State</div>
+                  <div id="diagMetricElevation" class="metric-value">—</div>
+                </div>
+              </div>
+
+              <div class="path-box">
+                <div class="path-box-label">Engine Executable Binary</div>
+                <div id="diagMetricPath" class="path-box-value">Detecting path...</div>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <button id="diagPingBtn" class="btn btn-secondary" type="button">Run Diagnostic Ping</button>
+                <span id="diagTimestamp" style="font-size: 11.5px; color: var(--text-muted);">Not queried yet</span>
+              </div>
+            </div>
+
+            <!-- Recent Activity Log Card -->
+            <div class="card">
+              <div class="card-header">
+                <h2 class="card-title">Recent RPC Activity Log</h2>
+                <span style="font-size: 11px; color: var(--text-muted);">Last 5 calls</span>
+              </div>
+              <div id="activityLogList" class="activity-log-list">
+                <div style="font-size: 12px; color: var(--text-muted); padding: 8px 0;">No RPC calls recorded yet.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Bottom Status Bar -->
+  <footer class="app-statusbar">
+    <div class="statusbar-section">
+      <span id="statusBarDot" class="status-dot loading"></span>
+      <span id="statusBarStatus">Connecting...</span>
+      <span>•</span>
+      <span id="statusBarEngine">Engine v—</span>
+    </div>
+    <div class="statusbar-section">
+      <span id="statusBarAppsCount">0 apps</span>
+      <span>|</span>
+      <span id="statusBarTotalSize">0 MB</span>
+    </div>
+    <div class="statusbar-section">
+      <span id="statusBarLastScan">Last scan: never</span>
+    </div>
+  </footer>
+
+  <!-- Uninstall Confirmation Modal -->
+  <div id="uninstallModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg class="icon" style="color: var(--danger);"><use href="#i-warning"></use></svg>
+          <span>Confirm Uninstallation</span>
+        </div>
+        <button id="modalCloseX" class="close-btn" type="button" title="Close (Esc)"><svg class="icon"><use href="#i-close"></use></svg></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-app-card">
+          <div style="font-weight: 600; font-size: 14px; margin-bottom: 2px;" id="modalAppName">Application</div>
+          <div style="font-size: 11.5px; color: var(--text-muted);" id="modalAppMeta">Publisher • Version</div>
+        </div>
+
+        <div class="warning-callout">
+          <svg class="icon"><use href="#i-warning"></use></svg>
+          <span>This operation will remove software files and registry keys. Verify options before proceeding.</span>
+        </div>
+
+        <div class="modal-options-group">
+          <div class="modal-toggle-row">
+            <div>
+              <div style="font-weight: 500;">Quiet Mode (Unattended)</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Execute without interactive installer wizard prompts</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="modalQuietCheck" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="modal-toggle-row">
+            <div>
+              <div style="font-weight: 500;">Dry Run Simulation</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Preview uninstall parameters without mutating system files</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="modalSimulateCheck" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div id="modalAlert" class="warning-callout" style="display: none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="modalCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="modalConfirmBtn" class="btn btn-danger" type="button">Uninstall</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic Confirmation Modal (styled replacement for native window.confirm) -->
+  <div id="confirmModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitleText">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-title-icon tone-danger" id="confirmModalIcon"><svg class="icon" aria-hidden="true"><use href="#i-warning"></use></svg></span>
+          <span id="confirmModalTitleText">Confirm Action</span>
+        </div>
+        <button id="confirmModalCloseX" class="close-btn" type="button" title="Close (Esc)"><svg class="icon"><use href="#i-close"></use></svg></button>
+      </div>
+
+      <div class="modal-body">
+        <p class="confirm-message" id="confirmModalMessage">Are you sure you want to continue?</p>
+        <div class="modal-app-card confirm-detail" id="confirmModalDetail" style="display: none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="confirmModalCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="confirmModalOkBtn" class="btn btn-danger" type="button">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command Palette (Ctrl+K) -->
+  <div id="commandPalette" class="palette-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-panel">
+      <div class="palette-input-row">
+        <span class="search-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
+        <input id="paletteInput" type="text" role="combobox" aria-expanded="true" aria-controls="paletteResults"
+               aria-autocomplete="list" aria-label="Search apps, junk, startup, drivers or type a command"
+               placeholder='Search apps, junk, startup, drivers... try "uninstall chrome"' autocomplete="off" spellcheck="false" />
+        <span class="search-kbd">Esc</span>
+      </div>
+      <div id="paletteResults" class="palette-results" role="listbox" aria-label="Palette results"></div>
+      <div class="palette-footer">
+        <span><kbd class="pal-kbd">&uarr;</kbd><kbd class="pal-kbd">&darr;</kbd> navigate</span>
+        <span><kbd class="pal-kbd">Enter</kbd> run</span>
+        <span><kbd class="pal-kbd">Esc</kbd> close</span>
+        <span class="palette-footer-tip">Prefix "uninstall " to jump straight to the confirm modal</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Main Renderer Script (ES modules) -->
+  <script type="module" src="renderer/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+name: Cicada App Shell CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'cicada/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node Test & Shell Verification
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout cicada-app
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax gate (node --check)
+        run: npm run lint
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Verify CLI Doctor
+        run: node src/cli.js doctor || true

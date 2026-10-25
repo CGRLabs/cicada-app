@@ -1,0 +1,73 @@
+name: Cicada App Shell Release
+
+# Tag-driven release build. The engine is NOT part of this repository and is
+# not bundled here (engine/bin/ is a local drop-in); the packaged shell
+# resolves the engine via CICADA_ENGINE_PATH or an adjacent install at
+# runtime. Code signing activates automatically when CSC_LINK /
+# CSC_KEY_PASSWORD secrets are provided, per electron-builder.yml.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Bundle-Check (windows-latest)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout cicada-app
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax gate (node --check)
+        run: npm run lint
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Bundle-check (unpacked build)
+        run: npm run dist:dir
+
+      - name: Verify unpacked executable exists
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "dist/win-unpacked" -Filter "*.exe" -ErrorAction Stop |
+            Where-Object { $_.Name -notmatch 'Uninstall' } |
+            Select-Object -First 1
+          if (-not $exe) { throw "No packaged executable found in dist/win-unpacked" }
+          Write-Host "Bundle OK: $($exe.FullName) ($([math]::Round($exe.Length/1MB, 1)) MB)"
+
+      - name: Build installer + portable
+        run: npm run dist
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cicada-uninstaller-${{ github.ref_name }}
+          path: |
+            dist/*.exe
+            dist/*.yml
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.exe
+            dist/latest.yml
