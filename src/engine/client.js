@@ -1,25 +1,76 @@
-import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Cached engine discovery result. The filesystem does not change under us during a
+// process lifetime, and re-running existsSync for every CLI command / IPC handler was
+// both wasteful and racy (different commands could discover different paths).
+let resolvedEngineCache;
+
+/**
+ * Reads an optional engine-path override from the user config file. This lets people
+ * configure the engine once instead of exporting CICADA_ENGINE_PATH in every shell:
+ *   Windows: %APPDATA%\cicada\config.json   (e.g. C:\Users\you\AppData\Roaming\cicada\config.json)
+ *   macOS:   ~/Library/Application Support/cicada/config.json
+ *   Linux:   ~/.config/cicada/config.json
+ * Malformed or unreadable config files are ignored silently (fall through to auto-discovery).
+ * @returns {string|null}
+ */
+export function readEngineConfigPath() {
+  let configDir;
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    configDir = join(process.env.APPDATA, 'cicada');
+  } else if (process.platform === 'darwin') {
+    configDir = join(process.env.HOME || '', 'Library', 'Application Support', 'cicada');
+  } else {
+    configDir = join(process.env.XDG_CONFIG_HOME || join(process.env.HOME || '', '.config'), 'cicada');
+  }
+
+  try {
+    const raw = readFileSync(join(configDir, 'config.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.enginePath === 'string' && parsed.enginePath.trim()) {
+      return parsed.enginePath.trim();
+    }
+  } catch {
+    // No config, unreadable, or invalid JSON — auto-discovery handles it.
+  }
+  return null;
+}
+
 /**
  * Discovers the default Cicada Engine executable location.
  * Priority:
  * 1. CICADA_ENGINE_PATH environment variable
- * 2. Packaged app resources (Electron: <install>/resources/engine/cicada-engine.exe)
- * 3. Bundled engine in cicada-app (engine/bin/cicada-engine.exe)
- * 4. Adjacent Cicada-Uinstaller build output
- * 5. Adjacent bcu-engine build output
+ * 2. enginePath in the user config file (~/.config/cicada/config.json etc.)
+ * 3. Packaged app resources (Electron: <install>/resources/engine/cicada-engine.exe)
+ * 4. Bundled engine in cicada-app (engine/bin/cicada-engine.exe)
+ * 5. Adjacent Cicada-Uinstaller build output
+ * 6. Adjacent bcu-engine build output
  *
+ * Results are memoized for the lifetime of the process.
+ * @param {boolean} [refresh=false] Bypass the cache and re-scan the disk.
  * @returns {string|null} Resolved executable path if found, otherwise null.
  */
-export function resolveEnginePath() {
-  if (process.env.CICADA_ENGINE_PATH && existsSync(process.env.CICADA_ENGINE_PATH)) {
-    return resolve(process.env.CICADA_ENGINE_PATH);
+export function resolveEnginePath(refresh = false) {
+  if (resolvedEngineCache !== undefined && !refresh) {
+    return resolvedEngineCache;
+  }
+
+  const fromEnv = process.env.CICADA_ENGINE_PATH;
+  if (fromEnv && existsSync(fromEnv)) {
+    resolvedEngineCache = resolve(fromEnv);
+    return resolvedEngineCache;
+  }
+
+  const fromConfig = readEngineConfigPath();
+  if (fromConfig && existsSync(fromConfig)) {
+    resolvedEngineCache = resolve(fromConfig);
+    return resolvedEngineCache;
   }
 
   // When running from an electron-builder install (or `dist:dir` output), the engine is
@@ -39,18 +90,20 @@ export function resolveEnginePath() {
     resolve(process.cwd(), 'bin/publish/win-x64/cicada-engine.exe')
   );
 
+  resolvedEngineCache = null;
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
-      return candidate;
+      resolvedEngineCache = candidate;
+      break;
     }
   }
 
-  return null;
+  return resolvedEngineCache;
 }
 
 /**
  * JSON-RPC 2.0 stdio client for Cicada Engine.
- * Spawns one long-lived child process using child_process.execFile (no shell).
+ * Spawns one long-lived child process using child_process.spawn (no shell).
  */
 export class EngineClient {
   /**
@@ -58,12 +111,16 @@ export class EngineClient {
    * @param {string} [options.enginePath] - Path to the engine executable
    * @param {Function} [options.spawnProcess] - Injected process spawner for testing
    * @param {number} [options.timeoutMs=10000] - Request timeout in milliseconds
+   * @param {number} [options.maxStderrBytes=64*1024] - Cap on retained stderr diagnostics
+   *   so a chatty engine cannot grow the buffer without bound
    */
   constructor(options = {}) {
     this.enginePath = options.enginePath || resolveEnginePath();
     this.isCustomRunner = Boolean(options.spawnProcess);
-    this.spawnProcess = options.spawnProcess || ((exe, args, opts) => execFile(exe, args, opts));
+    // spawn() with an argument array and no shell — direct argv exec, never a shell string.
+    this.spawnProcess = options.spawnProcess || ((exe, args, opts) => spawn(exe, args, opts));
     this.timeoutMs = options.timeoutMs || 10000;
+    this.maxStderrBytes = options.maxStderrBytes || 64 * 1024;
 
     this.process = null;
     this.nextId = 0;
@@ -103,8 +160,12 @@ export class EngineClient {
 
     this.process.stderr.setEncoding('utf8');
     this.process.stderr.on('data', (chunk) => {
+      // Stderr is reserved for diagnostic logs, not JSON-RPC messages.
+      // Keep only the tail so memory stays bounded on long-lived sessions.
       this.stderrBuffer += chunk;
-      // Stderr is reserved for diagnostic logs, not JSON-RPC messages
+      if (this.stderrBuffer.length > this.maxStderrBytes) {
+        this.stderrBuffer = this.stderrBuffer.slice(-this.maxStderrBytes);
+      }
     });
 
     this.process.on('error', (err) => {
@@ -184,21 +245,50 @@ export class EngineClient {
   }
 
   /**
+   * Lazily ensures the engine process is running.
+   * @throws if the engine cannot be spawned.
+   */
+  _ensureStarted() {
+    if (!this.process) {
+      this.start();
+    }
+  }
+
+  /**
+   * Fire-and-forget JSON-RPC 2.0 notification (no id, no response expected).
+   * Useful for cancel propagation without awaiting a reply.
+   * @param {string} method
+   * @param {Object} [params={}]
+   * @returns {boolean} True if the notification was written to the transport.
+   */
+  notify(method, params = {}) {
+    try {
+      this._ensureStarted();
+      this.process.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n', 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Sends a JSON-RPC 2.0 request over stdin and waits for the response.
    * @param {string} method
    * @param {Object} [params={}]
    * @param {Object} [options={}]
    * @param {number} [options.timeoutMs] - Per-request timeout override (does not mutate client state,
    *   so concurrent requests with different deadlines are safe)
+   * @param {AbortSignal} [options.signal] - Cooperative cancellation; rejects with an
+   *   AbortError and drops the pending entry when aborted.
    * @returns {Promise<any>}
    */
   request(method, params = {}, options = {}) {
-    if (!this.process || !this.isConnected) {
-      try {
-        this.start();
-      } catch (err) {
-        return Promise.reject(err);
-      }
+    let writeTarget;
+    try {
+      this._ensureStarted();
+      writeTarget = this.process;
+    } catch (err) {
+      return Promise.reject(err);
     }
 
     const id = ++this.nextId;
@@ -213,27 +303,60 @@ export class EngineClient {
     });
 
     return new Promise((resolve, reject) => {
+      const signal = options.signal;
+
+      const cleanupSignal = () => {
+        if (onAbort) {
+          signal.removeEventListener('abort', onAbort);
+          onAbort = null;
+        }
+      };
+
+      const failFast = (err) => {
+        clearTimeout(timeoutId);
+        cleanupSignal();
+        this.pendingRequests.delete(id);
+        reject(err);
+      };
+
+      // Already-aborted signal: never put the request on the wire.
+      if (signal?.aborted) {
+        const err = new Error(`Request '${method}' aborted`);
+        err.name = 'AbortError';
+        reject(err);
+        return;
+      }
+
       const timeoutId = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error(`Request '${method}' timed out after ${timeoutMs}ms`));
+          failFast(new Error(`Request '${method}' timed out after ${timeoutMs}ms`));
         }
       }, timeoutMs);
+
+      let onAbort = null;
+      if (signal) {
+        onAbort = () => {
+          if (this.pendingRequests.has(id)) {
+            // Best-effort: tell the engine to forget about this request id.
+            this.notify('$/cancelRequest', { id });
+            const err = new Error(`Request '${method}' aborted`);
+            err.name = 'AbortError';
+            failFast(err);
+          }
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
 
       this.pendingRequests.set(id, { resolve, reject, timeoutId });
 
       try {
-        this.process.stdin.write(payload + '\n', 'utf8', (err) => {
+        writeTarget.stdin.write(payload + '\n', 'utf8', (err) => {
           if (err) {
-            clearTimeout(timeoutId);
-            this.pendingRequests.delete(id);
-            reject(err);
+            failFast(err);
           }
         });
       } catch (err) {
-        clearTimeout(timeoutId);
-        this.pendingRequests.delete(id);
-        reject(err);
+        failFast(err);
       }
     });
   }
@@ -403,40 +526,69 @@ export class EngineClient {
   }
 
   /**
-   * Closes the engine process cleanly.
+   * Closes the engine process cleanly. Idempotent and safe to await concurrently:
+   * repeated calls resolve against the same in-flight shutdown promise.
    */
   async stop() {
-    if (!this.process) return;
-
-    this.isConnected = false;
-    try {
-      this.process.stdin.end();
-    } catch {
-      // Ignored
+    if (this._stopPromise) {
+      return this._stopPromise;
     }
 
-    return new Promise((resolve) => {
-      if (!this.process) {
-        resolve();
+    const proc = this.process;
+    this.isConnected = false;
+
+    // Nobody should be waiting once we begin shutting down.
+    for (const [, pending] of this.pendingRequests.entries()) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(new Error('Engine client stopped'));
+    }
+    this.pendingRequests.clear();
+
+    if (!proc) {
+      return;
+    }
+
+    this._stopPromise = new Promise((resolveStop) => {
+      let settled = false;
+      let timer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (this.process === proc) {
+          this.process = null;
+        }
+        this._stopPromise = null;
+        resolveStop();
+      };
+
+      // If the child is already dead, `close` will never fire again — resolve now.
+      // (Also covers mock processes whose kill() emits 'close' synchronously.)
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        finish();
         return;
       }
 
-      const timer = setTimeout(() => {
-        if (this.process) {
-          try {
-            this.process.kill();
-          } catch {
-            // Ignored
-          }
+      // Kill fallback must never keep the event loop alive on its own.
+      timer = setTimeout(() => {
+        try {
+          proc.kill();
+        } catch {
+          // Ignored — process may already be gone.
         }
-        resolve();
+        finish();
       }, 1000);
+      timer.unref?.();
 
-      this.process.once('close', () => {
-        clearTimeout(timer);
-        this.process = null;
-        resolve();
-      });
+      proc.once('close', finish);
+
+      try {
+        proc.stdin.end();
+      } catch {
+        // Ignored — closing stdin failure just means we wait for the kill fallback.
+      }
     });
+
+    return this._stopPromise;
   }
 }

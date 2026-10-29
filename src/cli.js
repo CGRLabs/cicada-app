@@ -7,6 +7,122 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// ---------------------------------------------------------------------------
+// Shared helpers (production-ready plumbing for every subcommand)
+// ---------------------------------------------------------------------------
+
+const ENGINE_MISSING_HINT =
+  'Hint: build the engine or point Cicada at it — set CICADA_ENGINE_PATH,\n' +
+  '     write {"enginePath": "C:\\\\path\\\\cicada-engine.exe"} to the cicada config file,\n' +
+  '     or drop cicada-engine.exe into engine/bin/.';
+
+/**
+ * Resolves the engine path or prints a uniform, actionable error and returns null.
+ * Every command used to duplicate this block with slightly different wording.
+ */
+function requireEnginePath(commandName) {
+  const enginePath = resolveEnginePath();
+  if (!enginePath) {
+    console.error(`Error [${commandName}]: Could not locate cicada-engine.exe binary.`);
+    console.error(ENGINE_MISSING_HINT);
+    return null;
+  }
+  return enginePath;
+}
+
+/**
+ * Runs `fn` against a freshly-spawned engine client and guarantees the child
+ * process is stopped even if `fn` throws or the shell exits unexpectedly.
+ * If `enginePath` is omitted it is resolved (and reported) here.
+ */
+async function withEngine(commandName, fn, timeoutMs, enginePath = requireEnginePath(commandName)) {
+  if (!enginePath) {
+    process.exitCode = 1;
+    return;
+  }
+  const client = new EngineClient({ enginePath, timeoutMs });
+  try {
+    await fn(client);
+  } catch (err) {
+    console.error(`\nResult:    Refused / Failed`);
+    console.error(`Error:     ${err.message}`);
+    process.exitCode = 1;
+  } finally {
+    await client.stop();
+  }
+}
+
+/**
+ * Minimal, robust argv parser supporting:
+ *   --flag               -> true
+ *   --opt value          -> string
+ *   --opt=value          -> string
+ *   -s short form        -> mapped via `aliases`
+ * Everything not consumed as an option lands in `_` (positional operands).
+ */
+function parseArgs(argv, { aliases = {}, valueOpts = {} } = {}) {
+  const opts = { _: [] };
+  const longValue = new Set(Object.keys(valueOpts));
+  const longFlags = new Set(['json', 'quiet', 'dry-run', 'force', 'create', 'delete', 'clean', 'dns', 'arp', 'all', 'refresh']);
+  for (const a of Object.values(aliases)) longFlags.add(a);
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+
+    if (arg === '--') {
+      opts._.push(...argv.slice(i + 1));
+      break;
+    }
+
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=');
+      const name = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
+      const canonical = aliases[name] || name;
+
+      if (eq !== -1) {
+        opts[canonical] = arg.slice(eq + 1);
+      } else if (longValue.has(canonical)) {
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith('-')) {
+          opts[canonical] = next;
+          i++;
+        } else {
+          opts[canonical] = true; // present but missing value — treated by callers
+        }
+      } else if (longFlags.has(canonical)) {
+        opts[canonical] = true;
+      } else {
+        opts[canonical] = true; // unknown flags are still recorded truthily
+      }
+      continue;
+    }
+
+    if (arg.length > 1 && arg.startsWith('-') && !/^-\d/.test(arg)) {
+      // Short options, possibly bundled (-qn). Last one may take a value.
+      const chars = arg.slice(1).split('');
+      for (let c = 0; c < chars.length; c++) {
+        const canonical = aliases[chars[c]] || chars[c];
+        if (longValue.has(canonical)) {
+          const next = argv[i + 1];
+          if (next !== undefined && !next.startsWith('-')) {
+            opts[canonical] = next;
+            i++;
+          } else {
+            opts[canonical] = true;
+          }
+        } else {
+          opts[canonical] = true;
+        }
+      }
+      continue;
+    }
+
+    opts._.push(arg);
+  }
+
+  return opts;
+}
+
 function printVersion() {
   try {
     const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8'));
@@ -32,7 +148,7 @@ Usage:
 
 Options for list:
   --search <query>          Filter applications by name or publisher
-  --limit <n>               Maximum items to display (default: 50, 0 for all)
+  --limit <n>               Maximum items to display (default: 40, 0 for all)
   --json                    Output raw JSON array of applications
 
 Options for uninstall:
@@ -57,19 +173,23 @@ Other:
 
 Environment variables:
   CICADA_ENGINE_PATH        Override path to cicada-engine.exe
+
+Config file (optional, enginePath key):
+  Windows: %APPDATA%\\cicada\\config.json
+  Linux:   ~/.config/cicada/config.json
+  macOS:   ~/Library/Application Support/cicada/config.json
 `);
 }
 
 async function runDoctor() {
-  const enginePath = resolveEnginePath();
-
   console.log('Cicada Doctor');
   console.log('=============');
 
+  const enginePath = resolveEnginePath();
   if (!enginePath) {
     console.error('Status:          Disconnected');
     console.error('Error:           Could not locate cicada-engine.exe binary.');
-    console.error('Resolution:      Build the engine or set CICADA_ENGINE_PATH to the engine executable.');
+    console.error(ENGINE_MISSING_HINT);
     process.exitCode = 1;
     return;
   }
@@ -77,7 +197,6 @@ async function runDoctor() {
   console.log(`Engine Binary:   ${enginePath}`);
 
   const client = new EngineClient({ enginePath, timeoutMs: 5000 });
-
   try {
     const startTime = Date.now();
     const result = await client.ping();
@@ -102,34 +221,21 @@ async function runDoctor() {
 }
 
 async function runList(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
-    process.exitCode = 1;
-    return;
-  }
+  const opts = parseArgs(args, {
+    aliases: { s: 'search', l: 'limit' },
+    valueOpts: { search: String, limit: Number }
+  });
 
-  const isJson = args.includes('--json');
-  let search = null;
-  const searchIdx = args.indexOf('--search');
-  if (searchIdx !== -1 && args[searchIdx + 1]) {
-    search = args[searchIdx + 1].toLowerCase();
-  }
-
-  let limit = 40;
-  const limitIdx = args.findIndex((a) => a.startsWith('--limit'));
-  if (limitIdx !== -1) {
-    const val = args[limitIdx].includes('=') ? args[limitIdx].split('=')[1] : args[limitIdx + 1];
-    const parsed = parseInt(val, 10);
-    if (!isNaN(parsed)) limit = parsed;
-  }
+  const isJson = Boolean(opts.json);
+  const search = typeof opts.search === 'string' ? opts.search.toLowerCase() : null;
+  let limit = Number.isFinite(Number(opts.limit)) ? parseInt(opts.limit, 10) : 40;
+  if (opts.limit === true) limit = 40; // --limit given without a value keeps the default
 
   if (!isJson) {
     console.log('Scanning installed applications via Cicada Engine...');
   }
 
-  const client = new EngineClient({ enginePath, timeoutMs: 90000 });
-  try {
+  await withEngine('list', async (client) => {
     const res = await client.getApps();
     let apps = res.apps || [];
 
@@ -166,28 +272,26 @@ async function runList(args) {
     if (limit > 0 && apps.length > limit) {
       console.log(`\n... and ${apps.length - limit} more. Use --limit 0 to view all, or launch the GUI.`);
     }
-  } catch (err) {
-    console.error(`Error scanning applications: ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 90000);
 }
 
 async function runUninstall(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
+  const opts = parseArgs(args, { aliases: { q: 'quiet', n: 'dry-run' } });
+  const quiet = Boolean(opts.quiet);
+  const simulate = Boolean(opts.dryRun);
+  const appIds = opts._;
+
+  // Validate user input BEFORE touching the engine — a missing operand is a usage
+  // error, not an environment error, and the message must not be masked by
+  // "engine not found" on machines without the binary.
+  if (appIds.length === 0) {
+    console.error('Error: Application name or ID required.\nExample: cicada uninstall "7-Zip" --dry-run');
     process.exitCode = 1;
     return;
   }
 
-  const quiet = args.includes('--quiet') || args.includes('-q');
-  const simulate = args.includes('--dry-run') || args.includes('--simulate') || args.includes('-n');
-  const appIds = args.filter((a) => !a.startsWith('-'));
-
-  if (appIds.length === 0) {
-    console.error('Error: Application name or ID required.\nExample: cicada uninstall "7-Zip" --dry-run');
+  const enginePath = requireEnginePath('uninstall');
+  if (!enginePath) {
     process.exitCode = 1;
     return;
   }
@@ -199,8 +303,7 @@ async function runUninstall(args) {
     console.log(`Mode:      ${simulate ? 'Dry-Run Simulation (No system changes)' : 'Live Uninstallation'}`);
     console.log(`Quiet:     ${quiet ? 'Enabled (Unattended)' : 'Disabled (Interactive wizard)'}`);
 
-    const client = new EngineClient({ enginePath, timeoutMs: 120000 });
-    try {
+    await withEngine('uninstall', async (client) => {
       const result = await client.uninstallBatch({ apps: appIds, quiet, simulate });
       console.log(`\nResult:    Success`);
       console.log(`Message:   ${result.message}`);
@@ -209,13 +312,7 @@ async function runUninstall(args) {
         const statusTag = `[${res.status.toUpperCase()}]`.padEnd(14);
         console.log(`  ${statusTag} ${res.displayName || res.id}${res.error ? ` (${res.error})` : ''}`);
       }
-    } catch (err) {
-      console.error(`\nResult:    Refused / Failed`);
-      console.error(`Error:     ${err.message}`);
-      process.exitCode = 1;
-    } finally {
-      await client.stop();
-    }
+    }, 120000, enginePath);
     return;
   }
 
@@ -226,8 +323,7 @@ async function runUninstall(args) {
   console.log(`Mode:      ${simulate ? 'Dry-Run Simulation (No system changes)' : 'Live Uninstallation'}`);
   console.log(`Quiet:     ${quiet ? 'Enabled (Unattended)' : 'Disabled (Interactive wizard)'}`);
 
-  const client = new EngineClient({ enginePath, timeoutMs: 60000 });
-  try {
+  await withEngine('uninstall', async (client) => {
     const result = await client.uninstallApp({ id: appId, quiet, simulate });
     console.log(`\nResult:    Success`);
     console.log(`Status:    ${result.status}`);
@@ -237,33 +333,21 @@ async function runUninstall(args) {
     if (result.uninstallerCommand) {
       console.log(`Target:    ${result.uninstallerCommand}`);
     }
-  } catch (err) {
-    console.error(`\nResult:    Refused / Failed`);
-    console.error(`Error:     ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 60000, enginePath);
 }
 
 async function runClean(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
-    process.exitCode = 1;
-    return;
-  }
-
-  const simulate = args.includes('--dry-run') || args.includes('-n') || !args.includes('--force');
-  const appId = args.find((a) => !a.startsWith('-'));
+  const opts = parseArgs(args, { aliases: { n: 'dry-run' } });
+  // Safety default: live deletion requires an explicit --force.
+  const simulate = !opts.force;
+  const appId = opts._[0];
 
   console.log(`\nCicada Leftover Junk Cleaner`);
   console.log(`============================`);
   console.log(`Target:    ${appId || 'Orphaned Residuals'}`);
   console.log(`Mode:      ${simulate ? 'Dry-Run Simulation (Preview without deleting)' : 'Live Cleanup'}`);
 
-  const client = new EngineClient({ enginePath, timeoutMs: 90000 });
-  try {
+  await withEngine('clean', async (client) => {
     console.log(`\nScanning for residual filesystem and registry items...`);
     const scanRes = await client.scanJunk({ id: appId });
     const items = scanRes.items || [];
@@ -293,36 +377,19 @@ async function runClean(args) {
     if (cleanRes.refusedCount > 0) {
       console.log(`Protected: ${cleanRes.refusedCount} item(s) protected by Authoritative Deny-List`);
     }
-  } catch (err) {
-    console.error(`\nResult:    Refused / Failed`);
-    console.error(`Error:     ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 90000);
 }
 
 async function runStartup(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
-    process.exitCode = 1;
-    return;
-  }
-
-  const isJson = args.includes('--json');
-  let typeFilter = null;
-  const typeIdx = args.indexOf('--type');
-  if (typeIdx !== -1 && args[typeIdx + 1]) {
-    typeFilter = args[typeIdx + 1].toLowerCase();
-  }
+  const opts = parseArgs(args, { aliases: { t: 'type' }, valueOpts: { type: String } });
+  const isJson = Boolean(opts.json);
+  const typeFilter = typeof opts.type === 'string' ? opts.type.toLowerCase() : null;
 
   if (!isJson) {
     console.log('Enumerating startup items, services, and tasks...');
   }
 
-  const client = new EngineClient({ enginePath, timeoutMs: 60000 });
-  try {
+  await withEngine('startup', async (client) => {
     const res = await client.listStartup();
     let items = res.items || [];
 
@@ -358,35 +425,21 @@ async function runStartup(args) {
       const cmd = item.command || item.commandFilePath || item.location || '';
       console.log(`${name}${kind}${state}${prot}${cmd}`);
     }
-  } catch (err) {
-    console.error(`Error querying startup entries: ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 60000);
 }
 
 async function runRestore(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
-    process.exitCode = 1;
-    return;
-  }
+  const opts = parseArgs(args, {
+    aliases: { n: 'dry-run' },
+    valueOpts: { create: String }
+  });
+  const isDryRun = Boolean(opts.dryRun);
 
-  const isDryRun = args.includes('--dry-run') || args.includes('-n');
-  const createIdx = args.findIndex((a) => a === '--create' || a.startsWith('--create='));
-
-  const client = new EngineClient({ enginePath, timeoutMs: 60000 });
-  try {
-    if (createIdx !== -1) {
-      let desc = 'Cicada Uninstaller Checkpoint';
-      const rawArg = args[createIdx];
-      if (rawArg.includes('=')) {
-        desc = rawArg.split('=')[1];
-      } else if (args[createIdx + 1] && !args[createIdx + 1].startsWith('-')) {
-        desc = args[createIdx + 1];
-      }
+  await withEngine('restore', async (client) => {
+    if (opts.create !== undefined) {
+      const desc = typeof opts.create === 'string' && opts.create
+        ? opts.create
+        : 'Cicada Uninstaller Checkpoint';
 
       console.log(`Creating System Restore Point: "${desc}" (dry-run: ${isDryRun})...`);
       const res = await client.createRestorePoint({ description: desc, simulate: isDryRun });
@@ -398,28 +451,16 @@ async function runRestore(args) {
       console.log('=====================');
       console.log(`Available on Host: ${res.available ? 'Yes (Enabled)' : 'No (Disabled or Unsupported)'}`);
     }
-  } catch (err) {
-    console.error(`System restore error: ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 60000);
 }
 
 async function runDrivers(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
-    process.exitCode = 1;
-    return;
-  }
+  const opts = parseArgs(args, { aliases: { n: 'dry-run' }, valueOpts: { delete: String } });
+  const isJson = Boolean(opts.json);
+  const isDryRun = Boolean(opts.dryRun);
+  const deleteTarget = typeof opts.delete === 'string' ? opts.delete : null;
 
-  const isJson = args.includes('--json');
-  const deleteTarget = args.includes('--delete') ? args[args.indexOf('--delete') + 1] : null;
-  const isDryRun = args.includes('--dry-run') || args.includes('-n');
-
-  const client = new EngineClient({ enginePath, timeoutMs: 15000 });
-  try {
+  await withEngine('drivers', async (client) => {
     if (deleteTarget) {
       const result = await client.deleteDriver({ id: deleteTarget, dryRun: isDryRun });
       if (isJson) {
@@ -451,32 +492,20 @@ async function runDrivers(args) {
         status
       );
     }
-  } catch (err) {
-    console.error(`Driver error: ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 15000);
 }
 
 async function runNetwork(args) {
-  const enginePath = resolveEnginePath();
-  if (!enginePath) {
-    console.error('Error: Could not locate cicada-engine.exe binary.');
-    process.exitCode = 1;
-    return;
-  }
+  const opts = parseArgs(args, { aliases: { n: 'dry-run' } });
+  const isJson = Boolean(opts.json);
+  const doClean = Boolean(opts.clean);
+  const isDryRun = Boolean(opts.dryRun);
 
-  const isJson = args.includes('--json');
-  const doClean = args.includes('--clean');
-  const isDryRun = args.includes('--dry-run') || args.includes('-n');
-
-  const client = new EngineClient({ enginePath, timeoutMs: 15000 });
-  try {
+  await withEngine('network', async (client) => {
     if (doClean) {
       const tasks = [];
-      if (args.includes('--dns')) tasks.push('dns');
-      if (args.includes('--arp')) tasks.push('arp');
+      if (opts.dns) tasks.push('dns');
+      if (opts.arp) tasks.push('arp');
       if (tasks.length === 0) tasks.push('dns', 'arp');
 
       const result = await client.cleanNetwork({ tasks, dryRun: isDryRun });
@@ -514,12 +543,7 @@ async function runNetwork(args) {
         ip
       );
     }
-  } catch (err) {
-    console.error(`Network error: ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await client.stop();
-  }
+  }, 15000);
 }
 
 async function main() {
@@ -576,6 +600,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`Fatal CLI error: ${err.message}`);
+  console.error(`Fatal CLI error: ${err?.message || err}`);
   process.exit(1);
 });
